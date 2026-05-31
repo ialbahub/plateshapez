@@ -14,6 +14,14 @@ dependencies = [
     "types-pyyaml>=6.0.12.20250822",
 ]
 
+[project.optional-dependencies]
+# OCR evaluation harness (also needs the `tesseract` system binary).
+# Install with: uv sync --extra ocr
+ocr = [
+  "pytesseract>=0.3.10",
+  "rapidfuzz>=3.0",
+]
+
 [tool.uv]
 package = true
 

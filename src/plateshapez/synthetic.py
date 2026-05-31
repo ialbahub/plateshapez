@@ -269,9 +269,7 @@ def create_vehicle_background(
     # Round emblem near the top centre.
     er = round(height * 0.07)
     ecx, ecy = width // 2, round(height * 0.16)
-    draw.ellipse(
-        (ecx - er, ecy - er, ecx + er, ecy + er), fill=darker, outline=lighter, width=3
-    )
+    draw.ellipse((ecx - er, ecy - er, ecx + er, ecy + er), fill=darker, outline=lighter, width=3)
     draw.ellipse(
         (ecx - er // 2, ecy - er // 2, ecx + er // 2, ecy + er // 2), outline=lighter, width=2
     )
