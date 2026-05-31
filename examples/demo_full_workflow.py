@@ -17,71 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
-
-
-def create_test_images():
-    """Create synthetic test images for the demo."""
-    print("🎨 Creating test images...")
-
-    # Create directories in dataset/demo folder
-    os.makedirs("dataset/demo/backgrounds", exist_ok=True)
-    os.makedirs("dataset/demo/overlays", exist_ok=True)
-
-    # Create background car images
-    colors = [
-        ("red_car", (180, 50, 50)),
-        ("blue_car", (50, 100, 180)),
-        ("gray_car", (120, 120, 120)),
-    ]
-
-    for name, color in colors:
-        # Create a 800x600 image
-        img = Image.new("RGB", (800, 600), color=(240, 240, 240))
-        draw = ImageDraw.Draw(img)
-
-        # Draw a simple car shape
-        # Car body
-        draw.rectangle((200, 300, 600, 450), fill=color, outline=(0, 0, 0), width=3)
-        # Car roof
-        draw.rectangle((250, 250, 550, 300), fill=color, outline=(0, 0, 0), width=3)
-        # Wheels
-        draw.ellipse([220, 430, 280, 490], fill=(40, 40, 40), outline=(0, 0, 0), width=2)
-        draw.ellipse([520, 430, 580, 490], fill=(40, 40, 40), outline=(0, 0, 0), width=2)
-        # Windows
-        draw.rectangle((270, 260, 530, 290), fill=(150, 200, 255), outline=(0, 0, 0), width=2)
-
-        img.save(f"dataset/demo/backgrounds/{name}.jpg", "JPEG", quality=95)
-        print(f"  ✓ Created background: {name}.jpg")
-
-    # Create license plate overlays
-    plates = [("plate_abc123", "ABC 123"), ("plate_xyz789", "XYZ 789"), ("plate_test01", "TEST 01")]
-
-    for name, text in plates:
-        # Create a 200x60 image with transparency
-        img = Image.new("RGBA", (200, 60), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-
-        # Draw plate background
-        draw.rectangle((5, 5, 195, 55), fill=(255, 255, 255, 240), outline=(0, 0, 0, 255), width=2)
-
-        # Try to use a font, fall back to default
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
-        except OSError:
-            font = ImageFont.load_default()  # type: ignore[assignment]
-
-        # Draw text
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-        x = (200 - text_width) // 2
-        y = (60 - text_height) // 2
-
-        draw.text((x, y), text, fill=(0, 0, 0, 255), font=font)
-
-        img.save(f"dataset/demo/overlays/{name}.png", "PNG")
-        print(f"  ✓ Created overlay: {name}.png")
+from plateshapez.synthetic import create_test_images
 
 
 def run_cli_demo():
@@ -146,7 +82,15 @@ def run_cli_demo():
     # Generate dataset
     print("🎯 Generating dataset with CLI...")
     result = subprocess.run(
-        ["uv", "run", "advplate", "generate", "--config", "dataset/demo/demo_config.yaml", "--verbose"],
+        [
+            "uv",
+            "run",
+            "advplate",
+            "generate",
+            "--config",
+            "dataset/demo/demo_config.yaml",
+            "--verbose",
+        ],
         capture_output=True,
         text=True,
     )
@@ -191,9 +135,7 @@ def show_results():
     # Show CLI results
     cli_path = Path("demo_dataset")
     if cli_path.exists():
-        if labels := get_image_data(
-            cli_path, '📁 CLI Dataset: '
-        ):
+        if labels := get_image_data(cli_path, "📁 CLI Dataset: "):
             with open(labels[0]) as f:
                 sample_meta = json.load(f)
             print("📋 Sample metadata:")
@@ -202,7 +144,7 @@ def show_results():
     # Show API results
     api_path = Path("demo_dataset_api")
     if api_path.exists():
-        labels = get_image_data(api_path, '\n📁 API Dataset: ')
+        labels = get_image_data(api_path, "\n📁 API Dataset: ")
 
 
 def get_image_data(arg0, arg1):
