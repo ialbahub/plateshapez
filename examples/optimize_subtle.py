@@ -9,8 +9,8 @@ readability against visibility:
 
 It runs a random round, then hill-climbs (jitters the best configs) for a few
 rounds — "continuously improving". The fast engines (Tesseract + RapidOCR) drive
-the search; the top finalists are then validated with EasyOCR too. Saves the
-winner's clean/perturbed/pattern at 300 DPI and prints the analysis.
+the search; the top finalists are validated with EasyOCR too. Prints the
+analysis and the winning parameters.
 
 Run with: uv run python examples/optimize_subtle.py
 """
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,7 @@ from PIL import Image
 
 from plateshapez.ocr import (
     EasyOCREngine,
+    OCREngine,
     RapidOCREngine,
     TesseractEngine,
     character_score,
@@ -42,7 +44,8 @@ VIS_WEIGHT = 1.5  # OCR points traded per 1% visibility
 RANDOM_CONFIGS = 16
 REFINE_ROUNDS = [4, 3, 2]  # how many top configs to jitter each refine round
 
-CHOICES = {
+Config = dict[str, float]
+CHOICES: dict[str, list[float]] = {
     "count": [0, 6, 10, 14, 18, 24, 30],
     "smin": [2, 3, 4, 6, 8],
     "smax": [8, 14, 20, 28, 40],
@@ -53,16 +56,24 @@ CHOICES = {
 }
 
 
-def sample(rng: random.Random) -> dict:
-    cfg = {k: rng.choice(v) for k, v in CHOICES.items()}
+@dataclass
+class Result:
+    cfg: Config
+    vis: float
+    worst: float
+    objective: float
+
+
+def sample(rng: random.Random) -> Config:
+    cfg: Config = {k: rng.choice(v) for k, v in CHOICES.items()}
     cfg["smax"] = max(cfg["smax"], cfg["smin"] + 4)
     if cfg["count"] == 0 and cfg["noise"] == 0 and cfg["scratch"] == 0.0:
         cfg["noise"] = 40  # avoid a no-op config
     return cfg
 
 
-def jitter(cfg: dict, rng: random.Random) -> dict:
-    out = dict(cfg)
+def jitter(cfg: Config, rng: random.Random) -> Config:
+    out: Config = dict(cfg)
     for k in rng.sample(list(CHOICES), 3):  # nudge 3 params to a neighbour value
         opts = CHOICES[k]
         i = opts.index(cfg[k]) if cfg[k] in opts else 0
@@ -71,17 +82,18 @@ def jitter(cfg: dict, rng: random.Random) -> dict:
     return out
 
 
-def to_perturbations(cfg: dict) -> list:
-    perts: list = []
+def to_perturbations(cfg: Config) -> list[DatasetGenerator.PerturbationConf]:
+    perts: list[DatasetGenerator.PerturbationConf] = []
     if cfg["count"] > 0:
+        lum, alpha = int(cfg["lum"]), int(cfg["alpha"])
         perts.append(
             {
                 "name": "shapes",
                 "params": {
-                    "num_shapes": cfg["count"],
-                    "min_size": cfg["smin"],
-                    "max_size": cfg["smax"],
-                    "color": [cfg["lum"], cfg["lum"], cfg["lum"], cfg["alpha"]],
+                    "num_shapes": int(cfg["count"]),
+                    "min_size": int(cfg["smin"]),
+                    "max_size": int(cfg["smax"]),
+                    "color": [lum, lum, lum, alpha],
                 },
             }
         )
@@ -90,7 +102,7 @@ def to_perturbations(cfg: dict) -> list:
             {"name": "texture", "params": {"type": "scratches", "intensity": cfg["scratch"]}}
         )
     if cfg["noise"] > 0:
-        perts.append({"name": "noise", "params": {"intensity": cfg["noise"]}})
+        perts.append({"name": "noise", "params": {"intensity": int(cfg["noise"])}})
     return perts
 
 
@@ -113,12 +125,15 @@ def main() -> None:
     mask[by : by + oh, bx : bx + ow] = np.array(ov.split()[-1]) > 0
 
     expected = normalize_plate(PLATE)
-    search_engines = {"tesseract": TesseractEngine(), "rapidocr": RapidOCREngine()}
+    search_engines: dict[str, OCREngine] = {
+        "tesseract": TesseractEngine(),
+        "rapidocr": RapidOCREngine(),
+    }
 
-    cache: dict[str, dict] = {}
+    cache: dict[str, Result] = {}
     counter = [0]
 
-    def evaluate(cfg: dict) -> dict:
+    def evaluate(cfg: Config) -> Result:
         key = json.dumps(cfg, sort_keys=True)
         if key in cache:
             return cache[key]
@@ -132,81 +147,79 @@ def main() -> None:
             random_seed=100,
             save_perturbation_layer=False,
         ).run(n_variants=K)
-        vis, worst = [], []
+        vis: list[float] = []
+        worst: list[float] = []
         for lp in sorted((out / "labels").glob("*.json")):
             meta = json.loads(lp.read_text())
             img = Image.open(out / "images" / f"{lp.stem}.png").convert("RGB")
-            vis.append(
-                float(np.abs(np.array(img).astype(np.int16) - clean_arr)[mask].mean()) / 255 * 100
-            )
+            delta = np.abs(np.array(img).astype(np.int16) - clean_arr)[mask]
+            vis.append(float(delta.mean()) / 255 * 100)
             crop = crop_plate(img, meta)
             sc = [
                 character_score(expected, normalize_plate(e.read(crop)))
                 for e in search_engines.values()
             ]
             worst.append(max(sc))
-        res = {"cfg": cfg, "vis": float(np.mean(vis)), "worst": float(np.mean(worst))}
-        res["objective"] = res["worst"] + VIS_WEIGHT * res["vis"]
+        v, w = float(np.mean(vis)), float(np.mean(worst))
+        res = Result(cfg=cfg, vis=v, worst=w, objective=w + VIS_WEIGHT * v)
         cache[key] = res
         return res
 
     rng = random.Random(0)
     results = [evaluate(sample(rng)) for _ in range(RANDOM_CONFIGS)]
-    results.sort(key=lambda r: r["objective"])
+    results.sort(key=lambda r: r.objective)
+    b = results[0]
     print(
-        f"round0 (random {RANDOM_CONFIGS}): best objective {results[0]['objective']:.1f} "
-        f"(worst {results[0]['worst']:.0f}, vis {results[0]['vis']:.2f}%)"
+        f"round0 (random {RANDOM_CONFIGS}): obj {b.objective:.1f} "
+        f"(worst {b.worst:.0f}, vis {b.vis:.2f}%)"
     )
 
     for rnd, topn in enumerate(REFINE_ROUNDS, 1):
-        seeds = results[:topn]
-        for s in seeds:
+        for s in results[:topn]:
             for _ in range(3):
-                results.append(evaluate(jitter(s["cfg"], rng)))
-        results.sort(key=lambda r: r["objective"])
+                results.append(evaluate(jitter(s.cfg, rng)))
+        results.sort(key=lambda r: r.objective)
+        b = results[0]
         print(
-            f"round{rnd}: best objective {results[0]['objective']:.1f} "
-            f"(worst {results[0]['worst']:.0f}, vis {results[0]['vis']:.2f}%)  [{len(cache)} configs tried]"
+            f"round{rnd}: obj {b.objective:.1f} (worst {b.worst:.0f}, vis {b.vis:.2f}%) "
+            f"[{len(cache)} configs]"
         )
 
-    # Validate the top finalists with EasyOCR too (full 3-engine worst).
-    try:
-        easy = EasyOCREngine()
-    except Exception:
-        easy = None
     print("\nTop 8 (objective ascending):")
     print(f"{'worst':>6}{'vis%':>7}{'obj':>7}  params")
     for r in results[:8]:
-        c = r["cfg"]
+        c = r.cfg
         params = (
-            f"shapes n={c['count']} {c['smin']}-{c['smax']}px lum{c['lum']} a{c['alpha']} | "
-            f"noise {c['noise']} | scratch {c['scratch']}"
+            f"shapes n={int(c['count'])} {int(c['smin'])}-{int(c['smax'])}px "
+            f"lum{int(c['lum'])} a{int(c['alpha'])} | noise {int(c['noise'])} | "
+            f"scratch {c['scratch']}"
         )
-        print(f"{r['worst']:6.0f}{r['vis']:7.2f}{r['objective']:7.1f}  {params}")
+        print(f"{r.worst:6.0f}{r.vis:7.2f}{r.objective:7.1f}  {params}")
 
     best = results[0]
-    print(f"\nWINNER objective {best['objective']:.1f}: {best['cfg']}")
+    print(f"\nWINNER objective {best.objective:.1f}: {best.cfg}")
+
+    try:
+        easy: OCREngine | None = EasyOCREngine()
+    except Exception:
+        easy = None
     if easy is not None:
-        # recompute winner worst across all three engines on a fresh sample
         out = root / "winner_check"
         DatasetGenerator(
             bg_dir=ind / "backgrounds",
             overlay_dir=ind / "overlays",
             out_dir=out,
-            perturbations=to_perturbations(best["cfg"]),
+            perturbations=to_perturbations(best.cfg),
             random_seed=200,
         ).run(n_variants=K)
-        engines3 = {
-            "tesseract": search_engines["tesseract"],
-            "rapidocr": search_engines["rapidocr"],
-            "easyocr": easy,
-        }
+        engines3: dict[str, OCREngine] = {**search_engines, "easyocr": easy}
+        print("3-engine reads on the winner:")
         for lp in sorted((out / "labels").glob("*.json"))[:3]:
             meta = json.loads(lp.read_text())
             crop = crop_plate(Image.open(out / "images" / f"{lp.stem}.png").convert("RGB"), meta)
             reads = {n: normalize_plate(e.read(crop)) for n, e in engines3.items()}
             sc = {n: character_score(expected, reads[n]) for n in reads}
-            print("  reads:", "  ".join(f"{n}:{reads[n] or '_'}({sc[n]:.0f})" for n in reads))
+            print("  " + "  ".join(f"{n}:{reads[n] or '_'}({sc[n]:.0f})" for n in reads))
 
 
 if __name__ == "__main__":
