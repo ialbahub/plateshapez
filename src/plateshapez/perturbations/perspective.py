@@ -36,12 +36,15 @@ class PerspectivePerturbation(Perturbation):
             dst = np.array([[0, 0], [w - dx, dy], [w - dx, h - dy], [0, h]], dtype=np.float32)
 
         matrix = cv2.getPerspectiveTransform(src, dst)
+        # Fill the revealed corners by replicating the edge pixels (the plate
+        # border / dark surround) rather than mirroring the whole plate, which
+        # would tile a confusing second copy into the frame.
         warped = cv2.warpPerspective(
             crop,
             matrix,
             (w, h),
             flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_REFLECT,
+            borderMode=cv2.BORDER_REPLICATE,
         )
         arr[y : y + h, x : x + w] = warped
         return Image.fromarray(arr)
