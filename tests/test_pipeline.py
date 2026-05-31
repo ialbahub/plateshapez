@@ -151,13 +151,16 @@ class TestDatasetGenerator:
                 f"Images {img1_path.name} and {img2_path.name} differ"
             )
 
-    def test_perturbation_layer_saved_by_default(self, temp_dirs):
-        """Perturbations are saved to a separate transparent image per variant."""
+    def test_each_perturbation_saved_as_its_own_image(self, temp_dirs):
+        """Each perturbation is isolated into its own image, named per type."""
         gen = DatasetGenerator(
             bg_dir=temp_dirs["bg_dir"],
             overlay_dir=temp_dirs["overlay_dir"],
             out_dir=temp_dirs["output_dir"],
-            perturbations=[{"name": "shapes", "params": {"num_shapes": 10}}],
+            perturbations=[
+                {"name": "shapes", "params": {"num_shapes": 10}},
+                {"name": "noise", "params": {"intensity": 20}},
+            ],
             random_seed=42,
         )
         gen.run(n_variants=2)
@@ -165,21 +168,22 @@ class TestDatasetGenerator:
         pert_dir = temp_dirs["output_dir"] / "perturbations"
         assert pert_dir.exists()
 
+        # One image per perturbation per variant (2 perturbations x 2 variants).
         layers = sorted(pert_dir.glob("*.png"))
-        images = sorted((temp_dirs["output_dir"] / "images").glob("*.png"))
-        assert len(layers) == len(images) == 2
+        assert len(layers) == 4
+        assert {p.name for p in pert_dir.glob("*_shapes.png")}
+        assert {p.name for p in pert_dir.glob("*_noise.png")}
 
-        # Layers are transparent RGBA the same size as the composite.
+        composite = Image.open(next((temp_dirs["output_dir"] / "images").glob("*.png")))
         layer = Image.open(layers[0])
-        composite = Image.open(images[0])
         assert layer.mode == "RGBA"
         assert layer.size == composite.size
-        assert layer.getpixel((0, 0))[3] == 0  # corner untouched by the plate region
 
-        # Metadata references the perturbation layer file.
-        with open(temp_dirs["output_dir"] / "labels" / f"{layers[0].stem}.json") as f:
+        # Metadata lists each isolated perturbation image.
+        with open(next((temp_dirs["output_dir"] / "labels").glob("*.json"))) as f:
             metadata = json.load(f)
-        assert metadata["perturbation_layer"] == layers[0].name
+        types = [entry["type"] for entry in metadata["perturbation_layers"]]
+        assert types == ["shapes", "noise"]
 
     def test_perturbation_layer_can_be_disabled(self, temp_dirs):
         """No perturbations directory is created when the feature is disabled."""
@@ -196,24 +200,32 @@ class TestDatasetGenerator:
         assert not (temp_dirs["output_dir"] / "perturbations").exists()
         with open(next((temp_dirs["output_dir"] / "labels").glob("*.json"))) as f:
             metadata = json.load(f)
-        assert "perturbation_layer" not in metadata
+        assert "perturbation_layers" not in metadata
 
-    def test_perturbation_layer_is_lossless(self):
-        """Compositing the layer over the clean base reproduces the perturbed image."""
+    def test_noise_isolated_with_no_plate(self):
+        """The isolated noise image is grey speckle (no plate), transparent elsewhere."""
         import numpy as np
-        from PIL import ImageDraw
 
-        from plateshapez.utils.overlay import extract_perturbation_layer
+        from plateshapez.perturbations.noise import NoisePerturbation
+        from plateshapez.utils.overlay import extract_perturbation_delta
 
-        base = Image.new("RGB", (40, 30), color=(120, 130, 140))
-        perturbed = base.copy()
-        ImageDraw.Draw(perturbed).rectangle((5, 5, 15, 15), fill=(0, 0, 0))
+        # A bright "plate" patch on a darker background.
+        before = Image.new("RGB", (60, 40), color=(30, 30, 30))
+        before.paste(Image.new("RGB", (30, 20), (255, 255, 255)), (15, 10))
 
-        layer = extract_perturbation_layer(base, perturbed)
+        np.random.seed(0)
+        after = NoisePerturbation(intensity=20).apply(before.copy(), (15, 10, 30, 20))
+        layer = np.array(extract_perturbation_delta(before, after))
 
-        recomposited = base.copy()
-        recomposited.paste(layer, (0, 0), layer)
-        assert np.array_equal(np.array(recomposited), np.array(perturbed))
+        # Region where noise was applied: opaque, centred on mid-grey (no plate
+        # white, no background) -> values stay within midpoint +/- intensity.
+        region = layer[10:30, 15:45]
+        assert (region[..., 3] > 0).any()
+        rgb = region[region[..., 3] > 0][:, :3].astype(int)
+        assert rgb.min() >= 128 - 20 and rgb.max() <= 128 + 20
+
+        # Untouched corner stays fully transparent.
+        assert layer[0, 0, 3] == 0
 
     def test_error_on_missing_directories(self):
         """Test that missing directories raise appropriate errors."""

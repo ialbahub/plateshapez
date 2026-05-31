@@ -41,36 +41,43 @@ def get_overlay_region(
     return (x, y, w, h)
 
 
-def extract_perturbation_layer(base: Image.Image, perturbed: Image.Image) -> Image.Image:
-    """Isolate the perturbations (patterns and noise) onto a transparent layer.
+def extract_perturbation_delta(
+    before: Image.Image, after: Image.Image, *, midpoint: int = 128
+) -> Image.Image:
+    """Isolate a single perturbation's signal (e.g. speckles/noise) with no plate.
 
-    Returns an RGBA image that carries the perturbed RGB values wherever they
-    differ from the clean ``base`` composite, and is fully transparent
-    everywhere else. Compositing the returned layer back over ``base``
-    reproduces ``perturbed`` exactly, so the layer is a lossless representation
-    of just the adversarial patterns and noise, with the background removed.
+    Captures the *change* a perturbation made by taking the signed per-pixel
+    difference ``after - before`` and rendering it centred on a neutral mid-grey
+    (``midpoint``). Pixels the perturbation did not touch stay fully transparent,
+    so the result is a clean image of just that perturbation — the noise shows as
+    grey speckle and drawn shapes as silhouettes — with the underlying plate and
+    background removed entirely.
 
     Args:
-        base: The clean composite (background + overlay) before perturbations.
-        perturbed: The composite after perturbations were applied.
+        before: The composite immediately before this perturbation was applied.
+        after: The composite immediately after this perturbation was applied.
+        midpoint: Neutral grey level the signed delta is centred on.
 
     Returns:
-        An RGBA :class:`PIL.Image.Image` of the same size as ``perturbed``.
+        An RGBA :class:`PIL.Image.Image` the same size as ``after``.
     """
-    base_arr = np.array(base.convert("RGB"))
-    pert_arr = np.array(perturbed.convert("RGB"))
+    before_arr = np.asarray(before.convert("RGB"), dtype=np.int16)
+    after_arr = np.asarray(after.convert("RGB"), dtype=np.int16)
 
-    if base_arr.shape == pert_arr.shape:
-        changed = np.any(base_arr != pert_arr, axis=-1)
+    if before_arr.shape == after_arr.shape:
+        delta = after_arr - before_arr
+        changed = np.any(delta != 0, axis=-1)
     else:
-        # Geometric perturbations could change the canvas size; in that case the
-        # whole perturbed image is treated as the perturbation layer.
-        changed = np.ones(pert_arr.shape[:2], dtype=bool)
+        # Geometric perturbations may change the canvas size; fall back to
+        # showing the whole result relative to the neutral mid-grey.
+        delta = after_arr - midpoint
+        changed = np.ones(after_arr.shape[:2], dtype=bool)
 
-    layer = np.zeros((*pert_arr.shape[:2], 4), dtype=np.uint8)
-    layer[..., :3] = pert_arr
-    layer[..., 3] = np.where(changed, 255, 0).astype(np.uint8)
-    return Image.fromarray(layer, "RGBA")
+    vis = np.clip(midpoint + delta, 0, 255).astype(np.uint8)
+    out = np.zeros((*after_arr.shape[:2], 4), dtype=np.uint8)
+    out[changed, :3] = vis[changed]
+    out[changed, 3] = 255
+    return Image.fromarray(out, "RGBA")
 
 
 def ensure_rgb(image: Image.Image) -> Image.Image:
