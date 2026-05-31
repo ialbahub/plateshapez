@@ -2,6 +2,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -150,6 +151,64 @@ class TestDatasetGenerator:
             assert np.array_equal(arr1, arr2), (
                 f"Images {img1_path.name} and {img2_path.name} differ"
             )
+
+    def _run_with_rounded_plate(self, confine: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Run one variant with an elliptical (transparent-cornered) plate.
+
+        Returns the perturbed composite and a boolean mask of the plate's
+        transparent corners (inside the bbox but outside the ellipse).
+        """
+        from PIL import ImageDraw
+
+        from plateshapez.utils.overlay import calculate_center_position, ensure_rgb, ensure_rgba
+
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            bgd, ovd, out = t / "bg", t / "ov", t / "o"
+            bgd.mkdir()
+            ovd.mkdir()
+            Image.new("RGB", (120, 90), (0, 0, 255)).save(bgd / "bg.jpg")
+            ov = Image.new("RGBA", (60, 40), (0, 0, 0, 0))
+            ImageDraw.Draw(ov).ellipse((2, 2, 57, 37), fill=(255, 255, 255, 255))
+            ov.save(ovd / "ov.png")
+
+            DatasetGenerator(
+                bg_dir=bgd,
+                overlay_dir=ovd,
+                out_dir=out,
+                perturbations=[
+                    {"name": "shapes", "params": {"num_shapes": 200, "max_size": 10}},
+                    {"name": "noise", "params": {"intensity": 40}},
+                ],
+                random_seed=1,
+                save_perturbation_layer=False,
+                confine_to_plate=confine,
+            ).run(n_variants=1)
+            composite = np.array(Image.open(next((out / "images").glob("*.png"))).convert("RGB"))
+
+            # Reconstruct the clean composite to compare against.
+            bg = ensure_rgb(Image.open(bgd / "bg.jpg"))
+            overlay = ensure_rgba(Image.open(ovd / "ov.png"))
+            bx, by = calculate_center_position(bg, overlay)
+            clean = bg.copy()
+            clean.paste(overlay, (bx, by), overlay)
+
+            outside = np.zeros((bg.height, bg.width), dtype=bool)
+            outside[by : by + 40, bx : bx + 60] = np.array(overlay.split()[-1]) == 0
+            return composite, np.array(clean), outside
+
+    def test_perturbations_confined_to_plate(self):
+        """With confinement, nothing changes outside the plate's opaque pixels."""
+        composite, clean, outside = self._run_with_rounded_plate(confine=True)
+        # Every transparent-corner pixel is left exactly as the clean composite.
+        assert np.array_equal(composite[outside], clean[outside])
+        # The plate itself still differs (perturbations were applied).
+        assert not np.array_equal(composite, clean)
+
+    def test_perturbations_spill_when_unconfined(self):
+        """Without confinement, perturbations leak into the transparent corners."""
+        composite, clean, outside = self._run_with_rounded_plate(confine=False)
+        assert not np.array_equal(composite[outside], clean[outside])
 
     def test_all_perturbations_in_one_plate_free_image(self, temp_dirs):
         """All perturbations (patterns + noise) land in a single image per variant."""

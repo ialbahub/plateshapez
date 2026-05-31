@@ -40,6 +40,7 @@ class DatasetGenerator:
         random_seed: int | None = None,
         save_metadata: bool = True,
         save_perturbation_layer: bool = True,
+        confine_to_plate: bool = True,
         verbose: bool = False,
     ) -> None:
         """Initialize the dataset generator.
@@ -53,6 +54,10 @@ class DatasetGenerator:
             save_metadata: Whether to save JSON metadata files
             save_perturbation_layer: Whether to also save the perturbations
                 (patterns and noise) as a separate transparent image per variant
+            confine_to_plate: Clip every perturbation to the plate's opaque pixels
+                (the overlay's alpha) so nothing spills past the plate edges or
+                rounded corners onto the vehicle. Disable for whole-image
+                ("global" scope) perturbations.
             verbose: Enable verbose logging output
         """
         self.bg_dir: Path = Path(bg_dir)
@@ -67,6 +72,7 @@ class DatasetGenerator:
         self.random_seed: int | None = random_seed
         self.save_metadata: bool = save_metadata
         self.save_perturbation_layer: bool = save_perturbation_layer
+        self.confine_to_plate: bool = confine_to_plate
         if self.save_perturbation_layer:
             self.pert_dir.mkdir(parents=True, exist_ok=True)
         self.verbose: bool = verbose
@@ -108,6 +114,14 @@ class DatasetGenerator:
                 ow, oh = overlay.size
                 bx, by = position
 
+                # Boolean mask of the plate's opaque pixels in full-image
+                # coordinates, used to clip perturbations to the plate shape.
+                plate_mask: np.ndarray | None = None
+                if self.confine_to_plate:
+                    plate_mask = np.zeros((bg.height, bg.width), dtype=bool)
+                    ov_alpha = np.array(overlay.split()[-1]) > 0
+                    plate_mask[by : by + oh, bx : bx + ow] = ov_alpha
+
                 for i in range(n_variants):
                     # Create composite image
                     img = bg.copy()
@@ -116,6 +130,10 @@ class DatasetGenerator:
                     # Deterministic file stem shared by the composite, its label,
                     # and the isolated perturbation image.
                     stem = f"{bg_path.stem}_{ov_path.stem}_{i:03d}"
+
+                    # Clean composite kept so perturbations can be clipped back
+                    # to the plate shape after they are applied.
+                    base = img.copy() if plate_mask is not None else None
 
                     # A flat neutral-grey canvas the same perturbations are
                     # re-rendered onto, so the saved layer has no plate underneath.
@@ -147,6 +165,17 @@ class DatasetGenerator:
                         else:
                             img = pert.apply(img, (bx, by, ow, oh))
                         applied.append(pert.serialize())
+
+                    # Clip perturbations to the plate: restore the clean composite
+                    # anywhere outside the plate's opaque pixels.
+                    if plate_mask is not None and base is not None:
+                        img_arr = np.array(img)
+                        img_arr[~plate_mask] = np.array(base)[~plate_mask]
+                        img = Image.fromarray(img_arr)
+                        if neutral is not None:
+                            neutral_arr = np.array(neutral)
+                            neutral_arr[~plate_mask] = NEUTRAL_GREY
+                            neutral = Image.fromarray(neutral_arr)
 
                     # Save composite image
                     fname = f"{stem}.png"

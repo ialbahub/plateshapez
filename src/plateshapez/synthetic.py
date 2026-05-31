@@ -234,6 +234,76 @@ def create_background_image(
     return img
 
 
+def create_vehicle_background(
+    size: tuple[int, int] = (1600, 1100),
+    body_color: tuple[int, int, int] = (54, 58, 66),
+) -> Image.Image:
+    """Render a realistic dark vehicle rear for seating a license plate.
+
+    Unlike :func:`create_background_image` (a light clipart car), this draws a
+    car's rear panel — body with a vertical sheen, a bumper seam, a recessed
+    plate-mount, a round emblem and tail-light hints — so a plate composited at
+    the centre looks mounted on a vehicle.
+
+    Args:
+        size: Output image size as ``(width, height)``.
+        body_color: Base RGB colour of the vehicle body.
+
+    Returns:
+        An RGB :class:`PIL.Image.Image` of the vehicle rear.
+    """
+    width, height = size
+    img = Image.new("RGB", size, body_color)
+    draw = ImageDraw.Draw(img)
+
+    r, g, b = body_color
+    # Vertical sheen: brighter band across the upper-middle of the panel.
+    for y in range(height):
+        t = y / height
+        sheen = int(38 * max(0.0, 1.0 - abs(0.42 - t) * 3.2))
+        draw.line([(0, y), (width, y)], fill=(r + sheen, g + sheen, b + sheen))
+
+    darker = (max(0, r - 24), max(0, g - 24), max(0, b - 24))
+    lighter = (min(255, r + 26), min(255, g + 26), min(255, b + 26))
+
+    # Round emblem near the top centre.
+    er = round(height * 0.07)
+    ecx, ecy = width // 2, round(height * 0.16)
+    draw.ellipse(
+        (ecx - er, ecy - er, ecx + er, ecy + er), fill=darker, outline=lighter, width=3
+    )
+    draw.ellipse(
+        (ecx - er // 2, ecy - er // 2, ecx + er // 2, ecy + er // 2), outline=lighter, width=2
+    )
+
+    # Bumper seam line below the plate area.
+    seam_y = round(height * 0.72)
+    draw.line([(0, seam_y), (width, seam_y)], fill=darker, width=max(3, round(height * 0.006)))
+
+    # Recessed plate mount (slightly larger than a 2:1 plate, centred).
+    mw, mh = round(width * 0.46), round(height * 0.34)
+    mx, my = (width - mw) // 2, round(height * 0.30)
+    draw.rounded_rectangle(
+        (mx - 12, my - 12, mx + mw + 12, my + mh + 12),
+        radius=18,
+        fill=darker,
+        outline=(0, 0, 0),
+        width=3,
+    )
+
+    # Tail-light hints at the sides.
+    for cx in (round(width * 0.08), round(width * 0.92)):
+        draw.rounded_rectangle(
+            (cx - 60, seam_y - 40, cx + 60, seam_y + 30),
+            radius=16,
+            fill=(120, 40, 36),
+            outline=darker,
+            width=2,
+        )
+
+    return img
+
+
 def create_plate_pattern(
     text: str,
     size: tuple[int, int] = PLATE_SIZE,
