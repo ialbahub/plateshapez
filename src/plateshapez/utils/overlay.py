@@ -42,7 +42,11 @@ def get_overlay_region(
 
 
 def isolate_neutral_layer(
-    rendered: Image.Image, neutral: int = 128, *, contrast: float = 3.0
+    rendered: Image.Image,
+    neutral: int = 128,
+    *,
+    contrast: float = 3.0,
+    alpha_gain: float | None = None,
 ) -> Image.Image:
     """Drop a flat neutral-grey background, keeping only the perturbations.
 
@@ -52,27 +56,34 @@ def isolate_neutral_layer(
     carries no plate text or border, only the real noise and shapes.
 
     The deviation from neutral grey is amplified by ``contrast`` so the noise
-    reads as clearly visible speckle (not a flat grey wash), and every touched
-    pixel is fully opaque. Pixels the perturbations never changed stay
-    completely transparent.
+    reads as clearly visible speckle (not a flat grey wash).
 
     Args:
         rendered: A neutral-grey canvas with the perturbations applied to it.
         neutral: The flat grey level the canvas was filled with.
         contrast: Multiplier on each pixel's deviation from ``neutral``; higher
             values make low-intensity noise more visible.
+        alpha_gain: Controls transparency. ``None`` (default) makes every touched
+            pixel fully opaque (a solid speckle field). A number makes each
+            pixel's opacity proportional to its deviation from grey
+            (``alpha = |deviation| * alpha_gain``), so the background shows
+            through between speckles — a genuinely transparent pattern/noise PNG.
 
     Returns:
         An RGBA :class:`PIL.Image.Image` the same size as ``rendered``.
     """
     arr = np.asarray(rendered.convert("RGB")).astype(np.int16)
     deviation = arr - neutral
-    changed = np.any(deviation != 0, axis=-1)
+    magnitude = np.abs(deviation).max(axis=-1)
+    changed = magnitude > 0
 
     visible = np.clip(neutral + deviation * contrast, 0, 255).astype(np.uint8)
     out = np.zeros((*arr.shape[:2], 4), dtype=np.uint8)
     out[changed, :3] = visible[changed]
-    out[changed, 3] = 255
+    if alpha_gain is None:
+        out[changed, 3] = 255
+    else:
+        out[..., 3] = np.clip(magnitude * alpha_gain, 0, 255).astype(np.uint8)
     return Image.fromarray(out, "RGBA")
 
 

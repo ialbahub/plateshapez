@@ -41,6 +41,7 @@ class DatasetGenerator:
         save_metadata: bool = True,
         save_perturbation_layer: bool = True,
         confine_to_plate: bool = True,
+        perturbation_alpha_gain: float | None = None,
         verbose: bool = False,
     ) -> None:
         """Initialize the dataset generator.
@@ -58,6 +59,9 @@ class DatasetGenerator:
                 (the overlay's alpha) so nothing spills past the plate edges or
                 rounded corners onto the vehicle. Disable for whole-image
                 ("global" scope) perturbations.
+            perturbation_alpha_gain: When set, the saved perturbation layer uses
+                transparency proportional to each pixel's strength (a genuinely
+                transparent pattern/noise PNG) instead of a solid speckle field.
             verbose: Enable verbose logging output
         """
         self.bg_dir: Path = Path(bg_dir)
@@ -73,6 +77,7 @@ class DatasetGenerator:
         self.save_metadata: bool = save_metadata
         self.save_perturbation_layer: bool = save_perturbation_layer
         self.confine_to_plate: bool = confine_to_plate
+        self.perturbation_alpha_gain: float | None = perturbation_alpha_gain
         if self.save_perturbation_layer:
             self.pert_dir.mkdir(parents=True, exist_ok=True)
         self.verbose: bool = verbose
@@ -184,7 +189,9 @@ class DatasetGenerator:
                     # Save all perturbations (patterns + noise) together in one
                     # clear image, with the plate and background removed.
                     if neutral is not None:
-                        layer = isolate_neutral_layer(neutral, NEUTRAL_GREY)
+                        layer = isolate_neutral_layer(
+                            neutral, NEUTRAL_GREY, alpha_gain=self.perturbation_alpha_gain
+                        )
                         save_image(layer, self.pert_dir / fname)
 
                     # Only save metadata if enabled in config

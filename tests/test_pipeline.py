@@ -243,6 +243,26 @@ class TestDatasetGenerator:
             metadata = json.load(f)
         assert metadata["perturbation_layer"] == layers[0].name
 
+    def test_transparent_perturbation_layer(self, temp_dirs):
+        """alpha_gain makes the layer's opacity vary (transparent background)."""
+        gen = DatasetGenerator(
+            bg_dir=temp_dirs["bg_dir"],
+            overlay_dir=temp_dirs["overlay_dir"],
+            out_dir=temp_dirs["output_dir"],
+            perturbations=[{"name": "noise", "params": {"intensity": 20}}],
+            random_seed=3,
+            perturbation_alpha_gain=4.0,
+        )
+        gen.run(n_variants=1)
+        layer = np.array(
+            Image.open(next((temp_dirs["output_dir"] / "perturbations").glob("*.png")))
+        )
+        alpha = layer[..., 3]
+        assert alpha[0, 0] == 0  # transparent outside the plate
+        # Opacity varies with noise strength rather than being a flat 0/255 field.
+        partial = alpha[(alpha > 0) & (alpha < 255)]
+        assert partial.size > 0
+
     def test_perturbation_layer_can_be_disabled(self, temp_dirs):
         """No perturbations directory is created when the feature is disabled."""
         gen = DatasetGenerator(
