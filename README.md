@@ -153,14 +153,48 @@ logging:
 
 ### Available Perturbations
 
-- **shapes**: Random rectangles, ellipses, triangles (supports `scope: region|global`)
+- **shapes**: Random rectangles, ellipses, triangles; auto-contrast colour (white on dark plates). Supports `scope: region|global`
 - **noise**: Add Gaussian noise (supports `scope: region|global`)
 - **warp**: Mild geometric warping (supports `scope: region|global`)
 - **texture**: Overlay texture maps (grain, scratches, dirt)
+- **perspective**: Viewing-angle homography warp (`strength`, `tilt: h|v`)
+- **blur**: Gaussian or directional motion blur (`type`, `radius`, `angle`)
+- **glare**: Specular hot-spot / sun reflection (`intensity`, `cx`, `cy`, `spread`)
 
 **Scope Parameter**: All perturbations support a `scope` parameter:
 - `scope: region` (default): Apply only to the license plate area
 - `scope: global`: Apply to the entire image
+
+Perturbations are clipped to the plate's opaque pixels by default
+(`confine_to_plate=True`), so nothing spills onto the vehicle. Each generated
+variant also yields an isolated, plate-free perturbation image under
+`perturbations/`.
+
+### OCR Evaluation
+
+Test how well OCR/ALPR reads the perturbed plates and sort the results:
+
+```bash
+# Install the OCR extra + the tesseract binary
+uv sync --extra ocr            # add --extra ocr-easyocr for the deep-learning backend
+# (system) apt-get install tesseract-ocr
+
+# Generate many plates and split them by OCR success/failure
+uv run python examples/ocr_benchmark.py        # -> ocr_eval/{success,failure}/ + results.csv
+
+# Chart OCR score vs perturbation intensity (the "breaking curve")
+uv run python examples/ocr_intensity_sweep.py  # -> sweep.csv + sweep_chart.png
+```
+
+```python
+from plateshapez.ocr import TesseractEngine, evaluate_dataset  # or EasyOCREngine, PaddleOCREngine
+
+summary = evaluate_dataset("dataset", TesseractEngine(), success_threshold=100.0)
+print(summary["read_accuracy"], summary["success"], summary["failure"])
+```
+
+The engine is pluggable via the `OCREngine` protocol (Tesseract built in;
+EasyOCR/PaddleOCR backends available with their extras).
 
 ### CLI Reference
 
