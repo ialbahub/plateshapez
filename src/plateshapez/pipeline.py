@@ -11,8 +11,12 @@ from plateshapez.utils.overlay import (
     calculate_center_position,
     ensure_rgb,
     ensure_rgba,
-    extract_perturbation_delta,
+    isolate_neutral_layer,
 )
+
+# Flat grey the perturbation layer is rendered on so additive noise is centred
+# without clipping against the plate's white/black pixels.
+NEUTRAL_GREY = 128
 
 
 class DatasetGenerator:
@@ -113,9 +117,13 @@ class DatasetGenerator:
                     # and the isolated perturbation image.
                     stem = f"{bg_path.stem}_{ov_path.stem}_{i:03d}"
 
-                    # Snapshot the clean composite so the combined perturbation
-                    # signal can be isolated once all perturbations are applied.
-                    base = img.copy() if self.save_perturbation_layer else None
+                    # A flat neutral-grey canvas the same perturbations are
+                    # re-rendered onto, so the saved layer has no plate underneath.
+                    neutral = (
+                        Image.new("RGB", img.size, (NEUTRAL_GREY,) * 3)
+                        if self.save_perturbation_layer
+                        else None
+                    )
 
                     # Apply perturbations
                     applied: list[dict[str, Any]] = []
@@ -126,7 +134,18 @@ class DatasetGenerator:
 
                         cls = PERTURBATION_REGISTRY[name]
                         pert = cls(**perturbation_conf.get("params", {}))
-                        img = pert.apply(img, (bx, by, ow, oh))
+
+                        if neutral is not None:
+                            # Replay the exact same randomness onto the neutral
+                            # canvas so its perturbation matches the composite.
+                            py_state = random.getstate()
+                            np_state = np.random.get_state()
+                            img = pert.apply(img, (bx, by, ow, oh))
+                            random.setstate(py_state)
+                            np.random.set_state(np_state)
+                            neutral = pert.apply(neutral, (bx, by, ow, oh))
+                        else:
+                            img = pert.apply(img, (bx, by, ow, oh))
                         applied.append(pert.serialize())
 
                     # Save composite image
@@ -135,8 +154,8 @@ class DatasetGenerator:
 
                     # Save all perturbations (patterns + noise) together in one
                     # clear image, with the plate and background removed.
-                    if base is not None:
-                        layer = extract_perturbation_delta(base, img)
+                    if neutral is not None:
+                        layer = isolate_neutral_layer(neutral, NEUTRAL_GREY)
                         save_image(layer, self.pert_dir / fname)
 
                     # Only save metadata if enabled in config

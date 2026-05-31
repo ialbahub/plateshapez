@@ -41,41 +41,26 @@ def get_overlay_region(
     return (x, y, w, h)
 
 
-def extract_perturbation_delta(
-    before: Image.Image, after: Image.Image, *, midpoint: int = 128
-) -> Image.Image:
-    """Isolate a single perturbation's signal (e.g. speckles/noise) with no plate.
+def isolate_neutral_layer(rendered: Image.Image, neutral: int = 128) -> Image.Image:
+    """Drop a flat neutral-grey background, keeping only the perturbations.
 
-    Captures the *change* a perturbation made by taking the signed per-pixel
-    difference ``after - before`` and rendering it centred on a neutral mid-grey
-    (``midpoint``). Pixels the perturbation did not touch stay fully transparent,
-    so the result is a clean image of just that perturbation — the noise shows as
-    grey speckle and drawn shapes as silhouettes — with the underlying plate and
-    background removed entirely.
+    The perturbations are re-rendered onto a flat neutral-grey canvas (with no
+    plate or vehicle underneath), so additive noise is centred on grey instead
+    of clipping against the plate's white/black pixels. This keeps every pixel
+    the perturbations actually changed and turns the untouched neutral fill fully
+    transparent, leaving a clean image of just the patterns and noise.
 
     Args:
-        before: The composite immediately before this perturbation was applied.
-        after: The composite immediately after this perturbation was applied.
-        midpoint: Neutral grey level the signed delta is centred on.
+        rendered: A neutral-grey canvas with the perturbations applied to it.
+        neutral: The flat grey level the canvas was filled with.
 
     Returns:
-        An RGBA :class:`PIL.Image.Image` the same size as ``after``.
+        An RGBA :class:`PIL.Image.Image` the same size as ``rendered``.
     """
-    before_arr = np.asarray(before.convert("RGB"), dtype=np.int16)
-    after_arr = np.asarray(after.convert("RGB"), dtype=np.int16)
-
-    if before_arr.shape == after_arr.shape:
-        delta = after_arr - before_arr
-        changed = np.any(delta != 0, axis=-1)
-    else:
-        # Geometric perturbations may change the canvas size; fall back to
-        # showing the whole result relative to the neutral mid-grey.
-        delta = after_arr - midpoint
-        changed = np.ones(after_arr.shape[:2], dtype=bool)
-
-    vis = np.clip(midpoint + delta, 0, 255).astype(np.uint8)
-    out = np.zeros((*after_arr.shape[:2], 4), dtype=np.uint8)
-    out[changed, :3] = vis[changed]
+    arr = np.asarray(rendered.convert("RGB"))
+    changed = np.any(arr != neutral, axis=-1)
+    out = np.zeros((*arr.shape[:2], 4), dtype=np.uint8)
+    out[changed, :3] = arr[changed]
     out[changed, 3] = 255
     return Image.fromarray(out, "RGBA")
 

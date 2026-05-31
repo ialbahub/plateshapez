@@ -201,30 +201,59 @@ class TestDatasetGenerator:
             metadata = json.load(f)
         assert "perturbation_layer" not in metadata
 
-    def test_noise_isolated_with_no_plate(self):
-        """The isolated noise image is grey speckle (no plate), transparent elsewhere."""
+    def test_noise_layer_has_no_plate_ghost(self):
+        """The saved perturbation layer must not encode the plate's structure.
+
+        Additive noise clips at 0/255 over the plate's white/black pixels, which
+        previously leaked the plate into a naive difference. Rendering onto a
+        neutral canvas removes that, so the layer's grey values are uncorrelated
+        with the underlying plate brightness.
+        """
         import numpy as np
 
-        from plateshapez.perturbations.noise import NoisePerturbation
-        from plateshapez.utils.overlay import extract_perturbation_delta
+        from plateshapez.utils.overlay import (
+            calculate_center_position,
+            ensure_rgb,
+            ensure_rgba,
+        )
 
-        # A bright "plate" patch on a darker background.
-        before = Image.new("RGB", (60, 40), color=(30, 30, 30))
-        before.paste(Image.new("RGB", (30, 20), (255, 255, 255)), (15, 10))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            bg_dir, ov_dir, out = tmp / "bg", tmp / "ov", tmp / "out"
+            bg_dir.mkdir()
+            ov_dir.mkdir()
 
-        np.random.seed(0)
-        after = NoisePerturbation(intensity=20).apply(before.copy(), (15, 10, 30, 20))
-        layer = np.array(extract_perturbation_delta(before, after))
+            Image.new("RGB", (120, 90), "blue").save(bg_dir / "test_bg.jpg")
+            # A high-contrast plate: opaque white with a black bar, so the region
+            # has real luminance variance to correlate against.
+            plate = Image.new("RGBA", (60, 40), (255, 255, 255, 255))
+            plate.paste(Image.new("RGBA", (60, 12), (0, 0, 0, 255)), (0, 14))
+            plate.save(ov_dir / "test_overlay.png")
 
-        # Region where noise was applied: opaque, centred on mid-grey (no plate
-        # white, no background) -> values stay within midpoint +/- intensity.
-        region = layer[10:30, 15:45]
-        assert (region[..., 3] > 0).any()
-        rgb = region[region[..., 3] > 0][:, :3].astype(int)
-        assert rgb.min() >= 128 - 20 and rgb.max() <= 128 + 20
+            gen = DatasetGenerator(
+                bg_dir=bg_dir,
+                overlay_dir=ov_dir,
+                out_dir=out,
+                perturbations=[{"name": "noise", "params": {"intensity": 25}}],
+                random_seed=7,
+            )
+            gen.run(n_variants=1)
 
-        # Untouched corner stays fully transparent.
-        assert layer[0, 0, 3] == 0
+            layer = np.array(Image.open(next((out / "perturbations").glob("*.png"))).convert("RGBA"))
+
+            bg = ensure_rgb(Image.open(bg_dir / "test_bg.jpg"))
+            ov = ensure_rgba(Image.open(ov_dir / "test_overlay.png"))
+            base = bg.copy()
+            base.paste(ov, calculate_center_position(bg, ov), ov)
+            base_lum = np.array(base).astype(float).mean(axis=-1)
+
+        opaque = layer[..., 3] > 0
+        grey_dev = layer[..., :3].astype(float).mean(axis=-1) - 128
+        assert base_lum[opaque].std() > 50  # the plate really does vary in brightness
+        # Noise-only layer should be centred on grey and not track the plate.
+        corr = np.corrcoef(base_lum[opaque], grey_dev[opaque])[0, 1]
+        assert abs(corr) < 0.1
+        assert layer[0, 0, 3] == 0  # transparent outside the perturbed region
 
     def test_error_on_missing_directories(self):
         """Test that missing directories raise appropriate errors."""
