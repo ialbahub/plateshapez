@@ -23,7 +23,13 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
-from plateshapez.ocr import EasyOCREngine, TesseractEngine, character_score, normalize_plate
+from plateshapez.ocr import (
+    EasyOCREngine,
+    OCREngine,
+    TesseractEngine,
+    character_score,
+    normalize_plate,
+)
 from plateshapez.perturbations.base import Perturbation
 from plateshapez.perturbations.glare import GlarePerturbation
 from plateshapez.perturbations.noise import NoisePerturbation
@@ -138,7 +144,10 @@ def main() -> None:
     pos = calculate_center_position(bg, plate)
     expected = normalize_plate(PLATE)
 
-    engines = {"tesseract": TesseractEngine(), "easyocr": EasyOCREngine()}
+    engines: dict[str, OCREngine] = {
+        "tesseract": TesseractEngine(),
+        "easyocr": EasyOCREngine(),
+    }
 
     # recipe -> list of (both_fail, scores per engine, persp_label)
     stats: dict[str, list[tuple[bool, dict[str, float], str]]] = {r.name: [] for r in RECIPES}
