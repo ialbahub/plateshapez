@@ -110,17 +110,15 @@ class DatasetGenerator:
                     img.paste(overlay, position, overlay)
 
                     # Deterministic file stem shared by the composite, its label,
-                    # and any isolated per-perturbation images.
+                    # and the isolated perturbation image.
                     stem = f"{bg_path.stem}_{ov_path.stem}_{i:03d}"
 
-                    # Snapshot the state before each perturbation so its individual
-                    # contribution can be isolated into its own image.
-                    prev = img.copy() if self.save_perturbation_layer else None
+                    # Snapshot the clean composite so the combined perturbation
+                    # signal can be isolated once all perturbations are applied.
+                    base = img.copy() if self.save_perturbation_layer else None
 
                     # Apply perturbations
                     applied: list[dict[str, Any]] = []
-                    pert_layers: list[dict[str, str]] = []
-                    name_counts: dict[str, int] = {}
                     for perturbation_conf in self.perturbations:
                         name = perturbation_conf["name"]
                         if name not in PERTURBATION_REGISTRY:
@@ -131,21 +129,15 @@ class DatasetGenerator:
                         img = pert.apply(img, (bx, by, ow, oh))
                         applied.append(pert.serialize())
 
-                        # Isolate just this perturbation (e.g. noise/speckles) into
-                        # its own clear image, with the plate/background removed.
-                        if prev is not None:
-                            idx = name_counts.get(name, 0)
-                            name_counts[name] = idx + 1
-                            suffix = name if idx == 0 else f"{name}{idx}"
-                            layer_fname = f"{stem}_{suffix}.png"
-                            layer = extract_perturbation_delta(prev, img)
-                            save_image(layer, self.pert_dir / layer_fname)
-                            pert_layers.append({"type": name, "file": layer_fname})
-                            prev = img.copy()
-
                     # Save composite image
                     fname = f"{stem}.png"
                     save_image(img, self.img_dir / fname)
+
+                    # Save all perturbations (patterns + noise) together in one
+                    # clear image, with the plate and background removed.
+                    if base is not None:
+                        layer = extract_perturbation_delta(base, img)
+                        save_image(layer, self.pert_dir / fname)
 
                     # Only save metadata if enabled in config
                     if self.save_metadata:
@@ -159,7 +151,7 @@ class DatasetGenerator:
                             "variant_index": i,
                         }
                         if self.save_perturbation_layer:
-                            metadata["perturbation_layers"] = pert_layers
+                            metadata["perturbation_layer"] = fname
                         save_metadata(metadata, self.label_dir / f"{stem}.json")
 
                     total_images += 1
