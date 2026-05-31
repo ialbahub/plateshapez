@@ -125,6 +125,32 @@ class PaddleOCREngine:
         return " ".join(texts)
 
 
+class RapidOCREngine:
+    """OCR backend using RapidOCR — PaddleOCR's PP-OCR models on ONNXRuntime.
+
+    A free, public, pip-installable PaddleOCR family engine whose weights ship
+    inside the wheel, so it needs no model download at runtime (works offline).
+    Install the ``ocr-rapid`` extra.
+    """
+
+    name = "rapidocr"
+
+    def __init__(self) -> None:
+        from rapidocr_onnxruntime import RapidOCR  # optional dependency
+
+        self._ocr = RapidOCR()
+
+    def read(self, image: Image.Image) -> str:
+        import numpy as np
+
+        result, _ = self._ocr(np.asarray(image.convert("RGB")))
+        if not result:
+            return ""
+        # Each entry is [box, text, score]; read left-to-right by box x.
+        entries = sorted(result, key=lambda e: e[0][0][0])
+        return " ".join(str(e[1]) for e in entries)
+
+
 @dataclass
 class OCRResult:
     """Outcome of reading a single generated image."""
