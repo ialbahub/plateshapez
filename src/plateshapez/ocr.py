@@ -94,7 +94,8 @@ class EasyOCREngine:
 class PaddleOCREngine:
     """OCR backend using PaddleOCR (modern OCR, strong on text in the wild).
 
-    Requires ``paddleocr`` and ``paddlepaddle``. Downloads models on first use.
+    Requires ``paddleocr`` and ``paddlepaddle`` (PaddleOCR 3.x). Downloads
+    models on first use.
     """
 
     name = "paddleocr"
@@ -102,19 +103,26 @@ class PaddleOCREngine:
     def __init__(self, lang: str = "en") -> None:
         from paddleocr import PaddleOCR  # optional dependency, imported on use
 
-        self._ocr = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
+        # Disable the optional doc-orientation / unwarping models so only the
+        # detection+recognition models are needed (others may be unreachable).
+        self._ocr = PaddleOCR(
+            lang=lang,
+            use_textline_orientation=False,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+        )
 
     def read(self, image: Image.Image) -> str:
         import numpy as np
 
-        result = self._ocr.ocr(np.asarray(image.convert("RGB")), cls=True)
-        lines: list[str] = []
-        for page in result or []:
-            for entry in page or []:
-                # entry = [box, (text, confidence)]
-                if len(entry) >= 2 and entry[1]:
-                    lines.append(str(entry[1][0]))
-        return " ".join(lines)
+        result = self._ocr.predict(np.asarray(image.convert("RGB")))
+        texts: list[str] = []
+        for res in result or []:
+            # PaddleOCR 3.x returns dict-like results carrying ``rec_texts``.
+            rec = res.get("rec_texts") if hasattr(res, "get") else None
+            if rec:
+                texts.extend(str(t) for t in rec)
+        return " ".join(texts)
 
 
 @dataclass
