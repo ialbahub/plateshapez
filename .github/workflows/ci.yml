@@ -81,3 +81,9 @@ jobs:
         run: |
           chmod +x scripts/check.sh
           ./scripts/check.sh
+
+      - name: Run tests
+        shell: bash
+        working-directory: .
+        run: |
+          uv run pytest

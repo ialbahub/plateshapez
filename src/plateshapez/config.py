@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -57,7 +58,7 @@ def load_config(
     """
     Merge config with precedence: DEFAULTS < file (if provided) < CLI overrides.
     """
-    cfg = dict(DEFAULTS)
+    cfg = copy.deepcopy(DEFAULTS)
     if path:
         file_cfg = _load_file(Path(path))
         cfg = _deep_merge(cfg, file_cfg)

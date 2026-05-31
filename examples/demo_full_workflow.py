@@ -111,8 +111,7 @@ def run_cli_demo():
             "--dry-run",
             "--n_variants",
             "2",
-            "--config",
-            "/dev/null",  # Use defaults
+            # No --config: fall back to baked-in defaults
         ],
         capture_output=True,
         text=True,
@@ -189,7 +188,7 @@ def show_results():
     print("\n📊 Results Analysis:")
 
     # Show CLI results
-    cli_path = Path("demo_dataset")
+    cli_path = Path("dataset/demo/demo_dataset")
     if cli_path.exists():
         if labels := get_image_data(
             cli_path, '📁 CLI Dataset: '
@@ -200,7 +199,7 @@ def show_results():
             print(json.dumps(sample_meta, indent=2))
 
     # Show API results
-    api_path = Path("demo_dataset_api")
+    api_path = Path("dataset/demo/demo_dataset_api")
     if api_path.exists():
         labels = get_image_data(api_path, '\n📁 API Dataset: ')
 
@@ -220,11 +219,11 @@ def cleanup():
     import shutil
 
     cleanup_paths = [
-        "demo_backgrounds",
-        "demo_overlays",
-        "demo_dataset",
-        "demo_dataset_api",
-        "demo_config.yaml",
+        "dataset/demo/backgrounds",
+        "dataset/demo/overlays",
+        "dataset/demo/demo_dataset",
+        "dataset/demo/demo_dataset_api",
+        "dataset/demo/demo_config.yaml",
     ]
 
     for path in cleanup_paths:

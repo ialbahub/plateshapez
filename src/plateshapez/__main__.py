@@ -216,7 +216,6 @@ perturbations:
       num_shapes: 20
       min_size: 2
       max_size: 15
-      scope: region  # or "global"
   - name: noise
     params:
       intensity: 25

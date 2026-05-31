@@ -16,7 +16,6 @@ dataset/
 
 # Demo files (should be in dataset/ not root)
 demo_*
-*.yaml
 
 # Python
 __pycache__/

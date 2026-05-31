@@ -153,14 +153,16 @@ logging:
 
 ### Available Perturbations
 
-- **shapes**: Random rectangles, ellipses, triangles (supports `scope: region|global`)
+- **shapes**: Random rectangles, ellipses, triangles (applied within the plate region)
 - **noise**: Add Gaussian noise (supports `scope: region|global`)
 - **warp**: Mild geometric warping (supports `scope: region|global`)
-- **texture**: Overlay texture maps (grain, scratches, dirt)
+- **texture**: Overlay texture maps (grain, scratches, dirt; applied within the plate region)
 
-**Scope Parameter**: All perturbations support a `scope` parameter:
+**Scope Parameter**: The `noise` and `warp` perturbations support a `scope` parameter:
 - `scope: region` (default): Apply only to the license plate area
 - `scope: global`: Apply to the entire image
+
+The `shapes` and `texture` perturbations are always applied within the license plate region.
 
 ### CLI Reference
 

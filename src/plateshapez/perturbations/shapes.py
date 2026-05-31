@@ -27,16 +27,16 @@ class ShapesPerturbation(Perturbation):
         max_size: int = int(self.params.get("max_size", 10))
 
         for _ in range(num_shapes):
-            sx = random.randint(x, x + w)
-            sy = random.randint(y, y + h)
-            size = random.randint(min_size, max_size)
             shape_type = random.choice(["rect", "ellipse", "triangle"])
+            size = random.randint(min_size, max_size)
+            # Cap size so a whole shape can always fit within the region (small plates).
+            size = min(size, w // 2, h // 2)
 
-            if shape_type == "rect":
-                draw.rectangle((sx, sy, sx + size, sy + size), fill=(0, 0, 0, 255))
-            elif shape_type == "ellipse":
-                draw.ellipse((sx, sy, sx + size, sy + size), fill=(0, 0, 0, 255))
-            else:
+            if shape_type == "triangle":
+                # Triangle vertices spread +/- size around the anchor, so inset the
+                # anchor by `size` on every edge to keep the full shape in bounds.
+                sx = random.randint(x + size, x + w - size)
+                sy = random.randint(y + size, y + h - size)
                 draw.polygon(
                     [
                         (sx, sy),
@@ -45,5 +45,13 @@ class ShapesPerturbation(Perturbation):
                     ],
                     fill=(0, 0, 0, 255),
                 )
+            else:
+                # Rect/ellipse extend by `size` to the right and down only.
+                sx = random.randint(x, x + w - size)
+                sy = random.randint(y, y + h - size)
+                if shape_type == "rect":
+                    draw.rectangle((sx, sy, sx + size, sy + size), fill=(0, 0, 0, 255))
+                else:
+                    draw.ellipse((sx, sy, sx + size, sy + size), fill=(0, 0, 0, 255))
 
         return img
