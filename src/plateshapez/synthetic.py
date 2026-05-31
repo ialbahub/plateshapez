@@ -9,6 +9,7 @@ into separate, independently usable, and unit-testable functions.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -39,6 +40,169 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.truetype(_FONT_PATH, size)
     except OSError:
         return ImageFont.load_default()
+
+
+# Real US/Michigan plates are 12 in x 6 in -> a 2:1 aspect ratio.
+PLATE_OVERLAY_SIZE: tuple[int, int] = (1200, 600)
+
+
+@dataclass
+class PlateStyle:
+    """Colours and labels for a rendered license plate overlay."""
+
+    background: tuple[int, int, int] = (18, 18, 20)
+    foreground: tuple[int, int, int] = (235, 235, 235)
+    header: str = "MICHIGAN"
+    footer: str = "GREAT LAKE STATE"
+    sticker: str = "27"
+    sticker_sub: str = "AR"
+    sticker_color: tuple[int, int, int] = (235, 130, 28)
+    border: bool = True
+
+
+def _text_size(
+    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont
+) -> tuple[int, int]:
+    """Width/height of ``text`` rendered with ``font``."""
+    box = draw.textbbox((0, 0), text, font=font)
+    return box[2] - box[0], box[3] - box[1]
+
+
+def _fit_font(
+    draw: ImageDraw.ImageDraw, text: str, max_w: int, max_h: int, cap: int
+) -> ImageFont.FreeTypeFont:
+    """Largest bold font for which ``text`` fits inside ``max_w`` x ``max_h``."""
+    best = 8
+    size = 8
+    while size <= cap:
+        font = ImageFont.truetype(_FONT_PATH, size)
+        w, h = _text_size(draw, text, font)
+        if w <= max_w and h <= max_h:
+            best = size
+            size += 2
+        else:
+            break
+    return ImageFont.truetype(_FONT_PATH, best)
+
+
+def _draw_centered(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    cx: float,
+    band_top: float,
+    band_h: float,
+    fill: tuple[int, int, int],
+) -> None:
+    """Draw ``text`` horizontally centred on ``cx`` and vertically within a band."""
+    box = draw.textbbox((0, 0), text, font=font)
+    w, h = box[2] - box[0], box[3] - box[1]
+    x = cx - w / 2 - box[0]
+    y = band_top + (band_h - h) / 2 - box[1]
+    draw.text((x, y), text, font=font, fill=fill)
+
+
+def create_plate_overlay(
+    text: str,
+    *,
+    size: tuple[int, int] = PLATE_OVERLAY_SIZE,
+    style: PlateStyle | None = None,
+) -> Image.Image:
+    """Render a license plate overlay with an organised, auto-fit layout.
+
+    The plate content is laid out in three balanced vertical bands inside the
+    border — a header (state name), the main characters, and a footer (slogan) —
+    with the main characters auto-sized to fill the available width without
+    overflowing. A registration sticker is placed in the bottom-right corner.
+
+    Args:
+        text: The plate characters (e.g. ``"4J9T7W"``).
+        size: Output size as ``(width, height)``; defaults to a 2:1 plate.
+        style: Colours and labels; defaults to a black Michigan plate.
+
+    Returns:
+        An RGBA :class:`PIL.Image.Image` with a transparent outside corner.
+    """
+    style = style or PlateStyle()
+    width, height = size
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Rounded plate body.
+    radius = round(height * 0.07)
+    margin = round(height * 0.01)
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (margin, margin, width - margin, height - margin), radius=radius, fill=255
+    )
+    img.paste(Image.new("RGB", size, style.background), (0, 0), mask)
+
+    fg = (*style.foreground, 255)
+
+    # Inner content rectangle (inside the embossed border).
+    pad = round(height * 0.05)
+    left, top = pad, pad
+    right, bottom = width - pad, height - pad
+    content_w = right - left
+    content_h = bottom - top
+
+    if style.border:
+        draw.rounded_rectangle(
+            (left, top, right, bottom),
+            radius=round(radius * 0.7),
+            outline=fg,
+            width=max(2, round(height * 0.007)),
+        )
+        inset = round(height * 0.03)
+        left, top, right, bottom = left + inset, top + inset, right - inset, bottom - inset
+        content_w = right - left
+        content_h = bottom - top
+
+    # Three balanced bands: header / main characters / footer.
+    header_h = round(content_h * 0.20)
+    footer_h = round(content_h * 0.18)
+    gap = round(content_h * 0.04)
+    main_h = content_h - header_h - footer_h - 2 * gap
+    cx = (left + right) / 2
+
+    header_font = _fit_font(draw, style.header, int(content_w * 0.85), header_h, cap=header_h)
+    _draw_centered(draw, style.header, header_font, cx, top, header_h, style.foreground)
+
+    main_top = top + header_h + gap
+    main_font = _fit_font(draw, text, int(content_w * 0.92), int(main_h * 0.96), cap=main_h)
+    # Subtle embossed shadow then the face.
+    shadow_off = max(2, round(height * 0.008))
+    box = draw.textbbox((0, 0), text, font=main_font)
+    mw, mh = box[2] - box[0], box[3] - box[1]
+    mx = cx - mw / 2 - box[0]
+    my = main_top + (main_h - mh) / 2 - box[1]
+    bgc = style.background
+    shadow = (min(255, bgc[0] + 42), min(255, bgc[1] + 42), min(255, bgc[2] + 42), 255)
+    draw.text((mx + shadow_off, my + shadow_off), text, font=main_font, fill=shadow)
+    draw.text((mx, my), text, font=main_font, fill=fg)
+
+    footer_top = bottom - footer_h
+    footer_font = _fit_font(draw, style.footer, int(content_w * 0.70), footer_h, cap=footer_h)
+    _draw_centered(draw, style.footer, footer_font, cx, footer_top, footer_h, style.foreground)
+
+    # Registration sticker in the bottom-right corner, inside the border.
+    if style.sticker:
+        sw = round(content_w * 0.09)
+        sh = round(content_h * 0.20)
+        sx, sy = right - sw, bottom - sh
+        sticker_fill = (*style.sticker_color, 255)
+        draw.rounded_rectangle((sx, sy, right, bottom), radius=round(sh * 0.12), fill=sticker_fill)
+        ink = (20, 20, 20)
+        num_font = _fit_font(draw, style.sticker, round(sw * 0.62), round(sh * 0.62), cap=sh)
+        _draw_centered(draw, style.sticker, num_font, sx + sw * 0.38, sy, sh, ink)
+        if style.sticker_sub:
+            sub_font = _fit_font(draw, "M", round(sw * 0.3), round(sh * 0.3), cap=round(sh * 0.32))
+            for i, ch in enumerate(style.sticker_sub[:2]):
+                _draw_centered(
+                    draw, ch, sub_font, sx + sw * 0.82, sy + sh * (0.15 + 0.38 * i), sh * 0.3, ink
+                )
+
+    return img
 
 
 def create_background_image(

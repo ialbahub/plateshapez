@@ -1,19 +1,69 @@
 import tempfile
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 from plateshapez.synthetic import (
     BACKGROUND_SIZE,
     DEFAULT_BACKGROUNDS,
     DEFAULT_PLATES,
+    PLATE_OVERLAY_SIZE,
     PLATE_SIZE,
+    PlateStyle,
     create_background_image,
     create_backgrounds,
+    create_plate_overlay,
     create_plate_pattern,
     create_plates,
     create_test_images,
 )
+
+
+class TestPlateOverlay:
+    """Test the organised, auto-fit license plate overlay."""
+
+    def _text_ink_bbox(
+        self, img: Image.Image, fg: tuple[int, int, int] = (180, 180, 180)
+    ) -> tuple[int, int, int, int]:
+        """Bounding box of light foreground ink, excluding the border ring."""
+        arr = np.array(img)
+        w, h = img.size
+        b = round(h * 0.05) + round(h * 0.03) + 6  # inside the border outline
+        inner = arr[b : h - b, b : w - b]
+        mask = (
+            (inner[..., 0] > fg[0])
+            & (inner[..., 1] > fg[1])
+            & (inner[..., 2] > fg[2])
+            & (inner[..., 3] > 0)
+        )
+        ys, xs = np.where(mask)
+        return xs.min() + b, ys.min() + b, xs.max() + b, ys.max() + b
+
+    def test_default_plate_is_2to1_rgba(self):
+        plate = create_plate_overlay("4J9T7W")
+        assert plate.mode == "RGBA"
+        assert plate.size == PLATE_OVERLAY_SIZE
+        assert plate.size[0] == 2 * plate.size[1]
+
+    def test_text_fits_inside_border(self):
+        # Even a wide all-W plate must auto-fit within the border.
+        for text in ("4J9T7W", "AA9AFX", "WWWWWWW"):
+            plate = create_plate_overlay(text)
+            w, h = plate.size
+            b = round(h * 0.05) + round(h * 0.03)
+            x0, y0, x1, y1 = self._text_ink_bbox(plate)
+            assert b <= x0 and x1 <= w - b, f"{text} overflows horizontally"
+            assert b <= y0 and y1 <= h - b, f"{text} overflows vertically"
+
+    def test_outside_corner_transparent(self):
+        plate = create_plate_overlay("4J9T7W")
+        assert plate.getpixel((0, 0))[3] == 0
+
+    def test_custom_style_colors(self):
+        style = PlateStyle(background=(255, 255, 255), foreground=(0, 0, 0), border=False)
+        plate = create_plate_overlay("ABC123", style=style)
+        assert plate.size == PLATE_OVERLAY_SIZE
 
 
 class TestImageBuilders:
