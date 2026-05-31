@@ -21,6 +21,9 @@ ocr = [
   "pytesseract>=0.3.10",
   "rapidfuzz>=3.0",
 ]
+# Deep-learning OCR backends (large; pull PyTorch / PaddlePaddle).
+ocr-easyocr = ["easyocr>=1.7"]
+ocr-paddle = ["paddleocr>=2.7", "paddlepaddle>=2.6"]
 
 [tool.uv]
 package = true
@@ -58,6 +61,11 @@ ignore = []
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+
+[[tool.mypy.overrides]]
+# Optional OCR backends without type stubs.
+module = ["pytesseract", "easyocr", "paddleocr"]
+ignore_missing_imports = true
 
 [tool.mypy]
 python_version = "3.13"

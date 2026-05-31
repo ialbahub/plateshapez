@@ -17,6 +17,11 @@ class NoisePerturbation(Perturbation):
     def apply(self, img: Image.Image, region: tuple[int, int, int, int]) -> Image.Image:
         intensity: int = int(self.params.get("intensity", 15))
         scope: str = self.params.get("scope", "region")
+
+        # Zero (or negative) intensity means no noise; return the image as-is.
+        if intensity <= 0:
+            return img
+
         arr: np.ndarray = np.array(img)
 
         if scope == "global":

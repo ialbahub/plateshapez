@@ -273,6 +273,39 @@ class TestTexturePerturbation:
         return np.array(low_result)
 
 
+class TestRealismPerturbations:
+    """Blur, glare and perspective perturbations for realistic captures."""
+
+    def _plate_region_img(self) -> tuple[Image.Image, tuple[int, int, int, int]]:
+        from PIL import ImageDraw
+
+        img = Image.new("RGB", (120, 80), (20, 20, 20))
+        ImageDraw.Draw(img).rectangle((30, 25, 90, 55), fill=(240, 240, 240))
+        return img, (20, 15, 80, 50)
+
+    @pytest.mark.parametrize("name", ["blur", "glare", "perspective"])
+    def test_registered_and_change_region(self, name):
+        img, region = self._plate_region_img()
+        pert = PERTURBATION_REGISTRY[name]()
+        result = pert.apply(img.copy(), region)
+        assert isinstance(result, Image.Image)
+        assert result.size == img.size
+        assert not np.array_equal(np.array(result), np.array(img))
+
+    def test_blur_motion_type(self):
+        img, region = self._plate_region_img()
+        result = PERTURBATION_REGISTRY["blur"](type="motion", radius=3, angle=20).apply(img, region)
+        assert result.size == img.size
+
+    def test_glare_brightens(self):
+        img, region = self._plate_region_img()
+        before = np.array(img).astype(int)
+        after = np.array(PERTURBATION_REGISTRY["glare"](intensity=0.8).apply(img.copy(), region))
+        x, y, w, h = region
+        # The glare hot-spot must brighten the region on average.
+        assert after[y : y + h, x : x + w].astype(int).mean() > before[y : y + h, x : x + w].mean()
+
+
 class TestPerturbationChannelCompatibility:
     """Test perturbations work with different image channel counts."""
 

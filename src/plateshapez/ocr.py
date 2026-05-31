@@ -17,7 +17,7 @@ import json
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, Protocol, runtime_checkable
+from typing import Callable, Protocol, Sequence, runtime_checkable
 
 from PIL import Image
 
@@ -62,13 +62,59 @@ class TesseractEngine:
         psm: int = 7,
         whitelist: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
     ) -> None:
-        import pytesseract  # type: ignore[import-untyped]  # optional dependency
+        import pytesseract  # optional dependency, imported on use
 
         self._pt = pytesseract
         self._config = f"--psm {psm} -c tessedit_char_whitelist={whitelist}"
 
     def read(self, image: Image.Image) -> str:
         return str(self._pt.image_to_string(image, config=self._config)).strip()
+
+
+class EasyOCREngine:
+    """OCR backend using EasyOCR (deep learning, closer to real ALPR).
+
+    Requires ``easyocr`` (pulls PyTorch). Downloads its models on first use.
+    """
+
+    name = "easyocr"
+
+    def __init__(self, languages: list[str] | None = None, gpu: bool = False) -> None:
+        import easyocr  # optional dependency, imported on use
+
+        self._reader = easyocr.Reader(languages or ["en"], gpu=gpu, verbose=False)
+
+    def read(self, image: Image.Image) -> str:
+        import numpy as np
+
+        results = self._reader.readtext(np.asarray(image.convert("RGB")), detail=0)
+        return " ".join(results)
+
+
+class PaddleOCREngine:
+    """OCR backend using PaddleOCR (modern OCR, strong on text in the wild).
+
+    Requires ``paddleocr`` and ``paddlepaddle``. Downloads models on first use.
+    """
+
+    name = "paddleocr"
+
+    def __init__(self, lang: str = "en") -> None:
+        from paddleocr import PaddleOCR  # optional dependency, imported on use
+
+        self._ocr = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
+
+    def read(self, image: Image.Image) -> str:
+        import numpy as np
+
+        result = self._ocr.ocr(np.asarray(image.convert("RGB")), cls=True)
+        lines: list[str] = []
+        for page in result or []:
+            for entry in page or []:
+                # entry = [box, (text, confidence)]
+                if len(entry) >= 2 and entry[1]:
+                    lines.append(str(entry[1][0]))
+        return " ".join(lines)
 
 
 @dataclass
@@ -191,3 +237,73 @@ def evaluate_dataset(
         "results": results,
     }
     return summary
+
+
+def sweep_intensity(
+    bg_dir: str | Path,
+    overlay_dir: str | Path,
+    engine: OCREngine,
+    *,
+    perturbation: str,
+    param: str,
+    values: Sequence[float],
+    work_dir: str | Path,
+    base_params: dict | None = None,
+    n_variants: int = 10,
+    random_seed: int = 2025,
+    ground_truth: Callable[[dict], str] = ground_truth_from_overlay,
+    band: tuple[float, float] | None = (0.28, 0.74),
+    success_threshold: float = 100.0,
+) -> list[dict]:
+    """Sweep one perturbation parameter and measure OCR accuracy at each level.
+
+    For every value in ``values`` a dataset is generated (with ``perturbation``
+    set to that value, all else fixed and the seed held constant so levels are
+    comparable), then read by ``engine``. Returns one row per level with the
+    parameter value, read accuracy and mean character score — i.e. the
+    perturbation's "breaking curve" for that OCR engine.
+
+    Args:
+        bg_dir/overlay_dir: Inputs for the generator.
+        engine: OCR backend to evaluate with.
+        perturbation: Perturbation name to sweep (e.g. ``"noise"``).
+        param: The parameter of that perturbation to vary (e.g. ``"intensity"``).
+        values: Parameter values to test, in order.
+        work_dir: Scratch directory for the per-level datasets.
+        base_params: Other fixed params for the perturbation.
+        n_variants: Variants per plate per level.
+    """
+    # Imported here to avoid a circular import at module load time.
+    from plateshapez.pipeline import DatasetGenerator
+
+    work_dir = Path(work_dir)
+    rows: list[dict] = []
+    for value in values:
+        params = {**(base_params or {}), param: value}
+        level_dir = work_dir / f"{perturbation}_{param}_{value}"
+        DatasetGenerator(
+            bg_dir=bg_dir,
+            overlay_dir=overlay_dir,
+            out_dir=level_dir,
+            perturbations=[{"name": perturbation, "params": params}],
+            random_seed=random_seed,
+            save_perturbation_layer=False,
+        ).run(n_variants=n_variants)
+
+        summary = evaluate_dataset(
+            level_dir,
+            engine,
+            ground_truth=ground_truth,
+            band=band,
+            success_threshold=success_threshold,
+            copy_images=False,
+        )
+        rows.append(
+            {
+                "value": value,
+                "read_accuracy": summary["read_accuracy"],
+                "mean_score": summary["mean_score"],
+                "total": summary["total"],
+            }
+        )
+    return rows

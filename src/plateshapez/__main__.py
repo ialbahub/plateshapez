@@ -231,6 +231,17 @@ perturbations:
     params:
       type: grain  # grain, scratches, dirt
       intensity: 0.3
+  - name: perspective  # viewing-angle warp
+    params:
+      strength: 0.18
+      tilt: h  # or "v"
+  - name: blur
+    params:
+      type: gaussian  # or "motion"
+      radius: 2.0
+  - name: glare  # specular hot-spot
+    params:
+      intensity: 0.6
 
 logging:
   level: INFO
