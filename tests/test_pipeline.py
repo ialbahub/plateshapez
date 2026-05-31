@@ -239,7 +239,9 @@ class TestDatasetGenerator:
             )
             gen.run(n_variants=1)
 
-            layer = np.array(Image.open(next((out / "perturbations").glob("*.png"))).convert("RGBA"))
+            layer = np.array(
+                Image.open(next((out / "perturbations").glob("*.png"))).convert("RGBA")
+            )
 
             bg = ensure_rgb(Image.open(bg_dir / "test_bg.jpg"))
             ov = ensure_rgba(Image.open(ov_dir / "test_overlay.png"))

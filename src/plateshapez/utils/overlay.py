@@ -41,27 +41,38 @@ def get_overlay_region(
     return (x, y, w, h)
 
 
-def isolate_neutral_layer(rendered: Image.Image, neutral: int = 128) -> Image.Image:
+def isolate_neutral_layer(
+    rendered: Image.Image, neutral: int = 128, *, alpha_gain: float = 2.0
+) -> Image.Image:
     """Drop a flat neutral-grey background, keeping only the perturbations.
 
     The perturbations are re-rendered onto a flat neutral-grey canvas (with no
     plate or vehicle underneath), so additive noise is centred on grey instead
-    of clipping against the plate's white/black pixels. This keeps every pixel
-    the perturbations actually changed and turns the untouched neutral fill fully
-    transparent, leaving a clean image of just the patterns and noise.
+    of clipping against the plate's white/black pixels.
+
+    Transparency is scaled by how far each pixel deviates from the neutral grey,
+    so faint noise stays see-through (a *clear* speckle rather than a solid grey
+    block) while strong signal such as drawn shapes is fully opaque. Pixels the
+    perturbations never touched are completely transparent.
 
     Args:
         rendered: A neutral-grey canvas with the perturbations applied to it.
         neutral: The flat grey level the canvas was filled with.
+        alpha_gain: How quickly opacity ramps up with deviation from ``neutral``.
+            1.0 maps the maximum possible deviation to full opacity; higher
+            values make weak noise more visible.
 
     Returns:
         An RGBA :class:`PIL.Image.Image` the same size as ``rendered``.
     """
-    arr = np.asarray(rendered.convert("RGB"))
-    changed = np.any(arr != neutral, axis=-1)
+    arr = np.asarray(rendered.convert("RGB")).astype(np.int16)
+    deviation = np.abs(arr - neutral).max(axis=-1)
+    alpha = np.clip(deviation * alpha_gain, 0, 255).astype(np.uint8)
+
+    opaque = alpha > 0
     out = np.zeros((*arr.shape[:2], 4), dtype=np.uint8)
-    out[changed, :3] = arr[changed]
-    out[changed, 3] = 255
+    out[opaque, :3] = arr[opaque].astype(np.uint8)
+    out[..., 3] = alpha
     return Image.fromarray(out, "RGBA")
 
 
