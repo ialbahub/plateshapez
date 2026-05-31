@@ -165,6 +165,7 @@ def generate(
             perturbations=cfg.get("perturbations", []),
             random_seed=int(cfg["dataset"].get("random_seed", 1337)),
             save_metadata=cfg.get("logging", {}).get("save_metadata", True),
+            save_perturbation_layer=cfg.get("logging", {}).get("save_perturbation_layer", True),
         )
 
         if debug:
@@ -234,6 +235,7 @@ perturbations:
 logging:
   level: INFO
   save_metadata: true
+  save_perturbation_layer: true  # also save patterns + noise as a separate image
 """
     console.print(example_config)
 

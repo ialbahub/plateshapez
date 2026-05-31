@@ -26,7 +26,7 @@ DEFAULTS: dict[str, Any] = {
         },
         {"name": "noise", "params": {"intensity": 25}},
     ],
-    "logging": {"level": "INFO", "save_metadata": True},
+    "logging": {"level": "INFO", "save_metadata": True, "save_perturbation_layer": True},
 }
 
 

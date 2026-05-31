@@ -151,6 +151,70 @@ class TestDatasetGenerator:
                 f"Images {img1_path.name} and {img2_path.name} differ"
             )
 
+    def test_perturbation_layer_saved_by_default(self, temp_dirs):
+        """Perturbations are saved to a separate transparent image per variant."""
+        gen = DatasetGenerator(
+            bg_dir=temp_dirs["bg_dir"],
+            overlay_dir=temp_dirs["overlay_dir"],
+            out_dir=temp_dirs["output_dir"],
+            perturbations=[{"name": "shapes", "params": {"num_shapes": 10}}],
+            random_seed=42,
+        )
+        gen.run(n_variants=2)
+
+        pert_dir = temp_dirs["output_dir"] / "perturbations"
+        assert pert_dir.exists()
+
+        layers = sorted(pert_dir.glob("*.png"))
+        images = sorted((temp_dirs["output_dir"] / "images").glob("*.png"))
+        assert len(layers) == len(images) == 2
+
+        # Layers are transparent RGBA the same size as the composite.
+        layer = Image.open(layers[0])
+        composite = Image.open(images[0])
+        assert layer.mode == "RGBA"
+        assert layer.size == composite.size
+        assert layer.getpixel((0, 0))[3] == 0  # corner untouched by the plate region
+
+        # Metadata references the perturbation layer file.
+        with open(temp_dirs["output_dir"] / "labels" / f"{layers[0].stem}.json") as f:
+            metadata = json.load(f)
+        assert metadata["perturbation_layer"] == layers[0].name
+
+    def test_perturbation_layer_can_be_disabled(self, temp_dirs):
+        """No perturbations directory is created when the feature is disabled."""
+        gen = DatasetGenerator(
+            bg_dir=temp_dirs["bg_dir"],
+            overlay_dir=temp_dirs["overlay_dir"],
+            out_dir=temp_dirs["output_dir"],
+            perturbations=[{"name": "shapes", "params": {"num_shapes": 5}}],
+            random_seed=42,
+            save_perturbation_layer=False,
+        )
+        gen.run(n_variants=1)
+
+        assert not (temp_dirs["output_dir"] / "perturbations").exists()
+        with open(next((temp_dirs["output_dir"] / "labels").glob("*.json"))) as f:
+            metadata = json.load(f)
+        assert "perturbation_layer" not in metadata
+
+    def test_perturbation_layer_is_lossless(self):
+        """Compositing the layer over the clean base reproduces the perturbed image."""
+        import numpy as np
+        from PIL import ImageDraw
+
+        from plateshapez.utils.overlay import extract_perturbation_layer
+
+        base = Image.new("RGB", (40, 30), color=(120, 130, 140))
+        perturbed = base.copy()
+        ImageDraw.Draw(perturbed).rectangle((5, 5, 15, 15), fill=(0, 0, 0))
+
+        layer = extract_perturbation_layer(base, perturbed)
+
+        recomposited = base.copy()
+        recomposited.paste(layer, (0, 0), layer)
+        assert np.array_equal(np.array(recomposited), np.array(perturbed))
+
     def test_error_on_missing_directories(self):
         """Test that missing directories raise appropriate errors."""
         # Test missing background images

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Tuple
 
+import numpy as np
 from PIL import Image
 
 
@@ -38,6 +39,38 @@ def get_overlay_region(
     x, y = position
     w, h = overlay.size
     return (x, y, w, h)
+
+
+def extract_perturbation_layer(base: Image.Image, perturbed: Image.Image) -> Image.Image:
+    """Isolate the perturbations (patterns and noise) onto a transparent layer.
+
+    Returns an RGBA image that carries the perturbed RGB values wherever they
+    differ from the clean ``base`` composite, and is fully transparent
+    everywhere else. Compositing the returned layer back over ``base``
+    reproduces ``perturbed`` exactly, so the layer is a lossless representation
+    of just the adversarial patterns and noise, with the background removed.
+
+    Args:
+        base: The clean composite (background + overlay) before perturbations.
+        perturbed: The composite after perturbations were applied.
+
+    Returns:
+        An RGBA :class:`PIL.Image.Image` of the same size as ``perturbed``.
+    """
+    base_arr = np.array(base.convert("RGB"))
+    pert_arr = np.array(perturbed.convert("RGB"))
+
+    if base_arr.shape == pert_arr.shape:
+        changed = np.any(base_arr != pert_arr, axis=-1)
+    else:
+        # Geometric perturbations could change the canvas size; in that case the
+        # whole perturbed image is treated as the perturbation layer.
+        changed = np.ones(pert_arr.shape[:2], dtype=bool)
+
+    layer = np.zeros((*pert_arr.shape[:2], 4), dtype=np.uint8)
+    layer[..., :3] = pert_arr
+    layer[..., 3] = np.where(changed, 255, 0).astype(np.uint8)
+    return Image.fromarray(layer, "RGBA")
 
 
 def ensure_rgb(image: Image.Image) -> Image.Image:

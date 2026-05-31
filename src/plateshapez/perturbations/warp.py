@@ -23,26 +23,26 @@ class WarpPerturbation(Perturbation):
 
         if scope == "global":
             # Apply warp to entire image
-            dx, dy = np.meshgrid(np.arange(img_w), np.arange(img_h))
-            dx = dx + np.sin(dy / frequency) * intensity
-            dy = dy + np.cos(dx / frequency) * intensity
-            dx = np.clip(dx, 0, img_w - 1).astype(np.float32)
-            dy = np.clip(dy, 0, img_h - 1).astype(np.float32)
+            grid_x, grid_y = np.meshgrid(np.arange(img_w), np.arange(img_h))
+            map_x = grid_x + np.sin(grid_y / frequency) * intensity
+            map_y = grid_y + np.cos(map_x / frequency) * intensity
+            map_x = np.clip(map_x, 0, img_w - 1).astype(np.float32)
+            map_y = np.clip(map_y, 0, img_h - 1).astype(np.float32)
 
-            remap: np.ndarray = cv2.remap(arr, dx, dy, interpolation=cv2.INTER_LINEAR)
+            remap: np.ndarray = cv2.remap(arr, map_x, map_y, interpolation=cv2.INTER_LINEAR)
             return Image.fromarray(remap)
         else:
             # Apply warp only to region
             region_arr = arr[y : y + h, x : x + w].copy()
 
             # Create displacement maps for region only
-            dx, dy = np.meshgrid(np.arange(w), np.arange(h))
-            dx = dx + np.sin(dy / frequency) * intensity
-            dy = dy + np.cos(dx / frequency) * intensity
-            dx = np.clip(dx, 0, w - 1).astype(np.float32)
-            dy = np.clip(dy, 0, h - 1).astype(np.float32)
+            grid_x, grid_y = np.meshgrid(np.arange(w), np.arange(h))
+            map_x = grid_x + np.sin(grid_y / frequency) * intensity
+            map_y = grid_y + np.cos(map_x / frequency) * intensity
+            map_x = np.clip(map_x, 0, w - 1).astype(np.float32)
+            map_y = np.clip(map_y, 0, h - 1).astype(np.float32)
 
-            warped_region = cv2.remap(region_arr, dx, dy, interpolation=cv2.INTER_LINEAR)
+            warped_region = cv2.remap(region_arr, map_x, map_y, interpolation=cv2.INTER_LINEAR)
             arr[y : y + h, x : x + w] = warped_region
 
             return Image.fromarray(arr)

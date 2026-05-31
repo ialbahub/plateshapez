@@ -7,7 +7,12 @@ from PIL import Image
 
 from plateshapez.perturbations.base import PERTURBATION_REGISTRY
 from plateshapez.utils.io import iter_backgrounds, iter_overlays, save_image, save_metadata
-from plateshapez.utils.overlay import calculate_center_position, ensure_rgb, ensure_rgba
+from plateshapez.utils.overlay import (
+    calculate_center_position,
+    ensure_rgb,
+    ensure_rgba,
+    extract_perturbation_layer,
+)
 
 
 class DatasetGenerator:
@@ -30,6 +35,7 @@ class DatasetGenerator:
         perturbations: list["DatasetGenerator.PerturbationConf"] | None = None,
         random_seed: int | None = None,
         save_metadata: bool = True,
+        save_perturbation_layer: bool = True,
         verbose: bool = False,
     ) -> None:
         """Initialize the dataset generator.
@@ -41,6 +47,8 @@ class DatasetGenerator:
             perturbations: List of perturbation configurations to apply
             random_seed: Random seed for reproducible generation
             save_metadata: Whether to save JSON metadata files
+            save_perturbation_layer: Whether to also save the perturbations
+                (patterns and noise) as a separate transparent image per variant
             verbose: Enable verbose logging output
         """
         self.bg_dir: Path = Path(bg_dir)
@@ -48,11 +56,15 @@ class DatasetGenerator:
         self.out_dir: Path = Path(out_dir)
         self.img_dir: Path = self.out_dir / "images"
         self.label_dir: Path = self.out_dir / "labels"
+        self.pert_dir: Path = self.out_dir / "perturbations"
         self.img_dir.mkdir(parents=True, exist_ok=True)
         self.label_dir.mkdir(parents=True, exist_ok=True)
         self.perturbations: list[DatasetGenerator.PerturbationConf] = perturbations or []
         self.random_seed: int | None = random_seed
         self.save_metadata: bool = save_metadata
+        self.save_perturbation_layer: bool = save_perturbation_layer
+        if self.save_perturbation_layer:
+            self.pert_dir.mkdir(parents=True, exist_ok=True)
         self.verbose: bool = verbose
 
     def run(self, n_variants: int = 5) -> None:
@@ -97,6 +109,9 @@ class DatasetGenerator:
                     img = bg.copy()
                     img.paste(overlay, position, overlay)
 
+                    # Keep the clean composite so perturbations can be isolated later
+                    base = img.copy() if self.save_perturbation_layer else None
+
                     # Apply perturbations
                     applied: list[dict[str, Any]] = []
                     for perturbation_conf in self.perturbations:
@@ -115,6 +130,12 @@ class DatasetGenerator:
                     # Save image and metadata
                     save_image(img, self.img_dir / fname)
 
+                    # Save the perturbations (patterns and noise) as a separate
+                    # transparent image, with the background removed.
+                    if base is not None:
+                        layer = extract_perturbation_layer(base, img)
+                        save_image(layer, self.pert_dir / fname)
+
                     # Only save metadata if enabled in config
                     if self.save_metadata:
                         metadata: dict[str, Any] = {
@@ -126,6 +147,8 @@ class DatasetGenerator:
                             "random_seed": self.random_seed,
                             "variant_index": i,
                         }
+                        if self.save_perturbation_layer:
+                            metadata["perturbation_layer"] = fname
                         save_metadata(metadata, self.label_dir / fname.replace(".png", ".json"))
 
                     total_images += 1
