@@ -75,6 +75,36 @@ class TestShapesPerturbation:
         assert serialized["type"] == "shapes"
         assert serialized["params"] == params
 
+    def test_shapes_auto_color_inverts_on_dark_plate(self):
+        """Auto colour contrasts with the plate: white on dark, black on light."""
+        region = (0, 0, 60, 40)
+        on_dark = ShapesPerturbation(num_shapes=300).apply(
+            Image.new("RGB", (60, 40), (0, 0, 0)), region
+        )
+        on_light = ShapesPerturbation(num_shapes=300).apply(
+            Image.new("RGB", (60, 40), (255, 255, 255)), region
+        )
+        # Dark plate -> light (white) occlusions become visible.
+        assert np.array(on_dark).max() > 200
+        # Light plate -> dark (black) occlusions, as before.
+        assert np.array(on_light).min() < 50
+
+    def test_shapes_color_override(self):
+        """An explicit colour is honoured regardless of plate brightness."""
+        result = ShapesPerturbation(num_shapes=400, color="white").apply(
+            Image.new("RGB", (50, 50), (128, 128, 128)), (0, 0, 50, 50)
+        )
+        assert np.array(result).max() > 200
+
+    def test_shapes_color_is_cached_across_applications(self):
+        """The resolved colour is reused so the isolated layer matches the plate."""
+        pert = ShapesPerturbation(num_shapes=50)
+        pert.apply(Image.new("RGB", (40, 40), (0, 0, 0)), (0, 0, 40, 40))
+        assert pert._color == (255, 255, 255, 255)
+        # Re-applying onto a neutral-grey canvas must keep the same colour.
+        pert.apply(Image.new("RGB", (40, 40), (128, 128, 128)), (0, 0, 40, 40))
+        assert pert._color == (255, 255, 255, 255)
+
 
 class TestNoisePerturbation:
     """Test noise perturbation correctness."""
