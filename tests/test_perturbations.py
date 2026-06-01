@@ -297,6 +297,17 @@ class TestRealismPerturbations:
         result = PERTURBATION_REGISTRY["blur"](type="motion", radius=3, angle=20).apply(img, region)
         assert result.size == img.size
 
+    @pytest.mark.parametrize("diagonal", [False, True])
+    def test_grid_overlays_lines(self, diagonal):
+        img, region = self._plate_region_img()
+        result = PERTURBATION_REGISTRY["grid"](
+            spacing=8, width=2, alpha=200, diagonal=diagonal
+        ).apply(img.copy(), region)
+        assert result.size == img.size
+        assert result.mode == img.mode
+        # The grid lightens the dark plate where lines are drawn.
+        assert not np.array_equal(np.array(result), np.array(img))
+
     def test_glare_brightens(self):
         img, region = self._plate_region_img()
         before = np.array(img).astype(int)

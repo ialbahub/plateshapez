@@ -1,5 +1,5 @@
 # Import all perturbations to ensure they are registered
-from . import blur, glare, noise, perspective, shapes, texture, warp
+from . import blur, glare, grid, noise, perspective, shapes, texture, warp
 from .base import PERTURBATION_REGISTRY, register
 
 __all__ = [
@@ -7,6 +7,7 @@ __all__ = [
     "register",
     "blur",
     "glare",
+    "grid",
     "noise",
     "perspective",
     "shapes",
