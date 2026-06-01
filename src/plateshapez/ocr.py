@@ -151,6 +151,37 @@ class RapidOCREngine:
         return " ".join(str(e[1]) for e in entries)
 
 
+class FastALPREngine:
+    """Full ALPR backend using Fast-ALPR (YOLO detector + OCR).
+
+    Unlike the OCR-only backends, this runs plate **detection** then recognition
+    — the same engine the ALPRovingGround test suite uses. ``read`` returns the
+    recognized text, or an empty string when the detector finds no plate (a full
+    defeat). Feed it the whole scene (vehicle + plate), not a tight crop.
+
+    Requires ``fast-alpr`` (the ``ocr-fastalpr`` extra); downloads ONNX models
+    on first use.
+    """
+
+    name = "fast_alpr"
+
+    def __init__(
+        self,
+        detector_model: str = "yolo-v9-t-384-license-plate-end2end",
+        ocr_model: str = "global-plates-mobile-vit-v2-model",
+    ) -> None:
+        from fast_alpr import ALPR  # optional dependency, imported on use
+
+        self._alpr = ALPR(detector_model=detector_model, ocr_model=ocr_model)
+
+    def read(self, image: Image.Image) -> str:
+        import numpy as np
+
+        # Fast-ALPR expects BGR; return the top detection's text, else "".
+        results = self._alpr.predict(np.asarray(image.convert("RGB"))[:, :, ::-1])
+        return str(results[0].ocr.text) if results else ""
+
+
 @dataclass
 class OCRResult:
     """Outcome of reading a single generated image."""

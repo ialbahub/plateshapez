@@ -26,6 +26,8 @@ ocr-easyocr = ["easyocr>=1.7"]
 ocr-paddle = ["paddleocr>=2.7", "paddlepaddle>=2.6"]
 # RapidOCR: PaddleOCR's PP-OCR models on ONNXRuntime, weights bundled (offline).
 ocr-rapid = ["rapidocr-onnxruntime>=1.3"]
+# Fast-ALPR: full ALPR (YOLO detector + OCR) — the engine ALPRovingGround uses.
+ocr-fastalpr = ["fast-alpr>=0.4"]
 
 [tool.uv]
 package = true
@@ -66,7 +68,7 @@ line-ending = "auto"
 
 [[tool.mypy.overrides]]
 # Optional OCR backends without type stubs.
-module = ["pytesseract", "easyocr", "paddleocr", "rapidocr_onnxruntime"]
+module = ["pytesseract", "easyocr", "paddleocr", "rapidocr_onnxruntime", "fast_alpr"]
 ignore_missing_imports = true
 
 [tool.mypy]
